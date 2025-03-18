@@ -892,7 +892,6 @@ public:
 class UIRenderer : public ImGui_Renderer
 {
 private:
-	ImFont* m_FontOpenSans = nullptr;
     std::shared_ptr<donut::vfs::RootFileSystem> m_RootFs;
 	std::shared_ptr<ShaderFactory> m_ShaderFactory;
 
@@ -909,7 +908,6 @@ public:
         m_RootFs->mount("/media", mediaPath);
         m_RootFs->mount("/shaders/donut", frameworkShaderPath);
 
-        m_FontOpenSans = LoadFont(*m_RootFs, "/media/fonts/OpenSans/OpenSans-Regular.ttf", 17.f);
         m_ShaderFactory = std::make_shared<ShaderFactory>(GetDevice(), m_RootFs, "/shaders");
         return ImGui_Renderer::Init(m_ShaderFactory);
     }
