@@ -597,6 +597,8 @@ public:
             if (light->GetLightType() == LightType_Directional)
             {
                 m_SunLight = std::static_pointer_cast<DirectionalLight>(light);
+                if (m_SunLight->irradiance <= 0.f)
+                    m_SunLight->irradiance = 1.f;
                 break;
             }
         }
@@ -912,7 +914,7 @@ public:
 
             dm::affine3 viewMatrixInv = m_View->GetChildView(ViewType::PLANAR, 0)->GetInverseViewMatrix();
 
-            float zRange = length(sceneBounds.diagonal()) * 0.5f;
+            float zRange = length(sceneBounds.diagonal());
             m_ShadowMap->SetupForPlanarViewStable(*m_SunLight, projectionFrustum, viewMatrixInv, maxShadowDistance, zRange, zRange, m_ui.CsmExponent);
 
             m_ShadowMap->Clear(m_CommandList);
