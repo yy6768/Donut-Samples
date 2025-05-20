@@ -80,8 +80,8 @@ public:
         nvrhi::BindingLayoutDesc globalBindingLayoutDesc;
         globalBindingLayoutDesc.visibility = nvrhi::ShaderType::All;
         globalBindingLayoutDesc.bindings = {
-            { 0, nvrhi::ResourceType::RayTracingAccelStruct },
-            { 0, nvrhi::ResourceType::Texture_UAV }
+            nvrhi::BindingLayoutItem::RayTracingAccelStruct(0),
+            nvrhi::BindingLayoutItem::Texture_UAV(0)
         };
 
         m_BindingLayout = GetDevice()->createBindingLayout(globalBindingLayoutDesc);

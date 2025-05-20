@@ -264,14 +264,14 @@ public:
         nvrhi::BindingLayoutDesc globalBindingLayoutDesc;
         globalBindingLayoutDesc.visibility = nvrhi::ShaderType::All;
         globalBindingLayoutDesc.bindings = {
-            { 0, nvrhi::ResourceType::VolatileConstantBuffer },
-            { 0, nvrhi::ResourceType::RayTracingAccelStruct },
-            { 1, nvrhi::ResourceType::Texture_SRV },
-            { 2, nvrhi::ResourceType::Texture_SRV },
-            { 3, nvrhi::ResourceType::Texture_SRV },
-            { 4, nvrhi::ResourceType::Texture_SRV },
-            { 5, nvrhi::ResourceType::Texture_SRV },
-            { 0, nvrhi::ResourceType::Texture_UAV }
+            nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
+            nvrhi::BindingLayoutItem::RayTracingAccelStruct(0),
+            nvrhi::BindingLayoutItem::Texture_SRV(1),
+            nvrhi::BindingLayoutItem::Texture_SRV(2),
+            nvrhi::BindingLayoutItem::Texture_SRV(3),
+            nvrhi::BindingLayoutItem::Texture_SRV(4),
+            nvrhi::BindingLayoutItem::Texture_SRV(5),
+            nvrhi::BindingLayoutItem::Texture_UAV(0)
         };
 
         m_BindingLayout = GetDevice()->createBindingLayout(globalBindingLayoutDesc);
