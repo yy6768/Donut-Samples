@@ -29,6 +29,7 @@ set(folder "Examples/Ray Traced Particles")
 
 donut_compile_shaders(
     TARGET ${project}_shaders
+    PROJECT_NAME "Ray Traced Particles"
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
     SOURCES ${shaders}
     FOLDER ${folder}

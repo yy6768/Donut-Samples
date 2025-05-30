@@ -29,6 +29,7 @@ set(folder "Examples/Bindless Ray Tracing")
 
 donut_compile_shaders(
     TARGET ${project}_shaders
+    PROJECT_NAME "Bindless Ray Tracing"
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
     SOURCES ${shaders}
     FOLDER ${folder}

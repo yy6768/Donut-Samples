@@ -29,6 +29,7 @@ set(folder "Examples/Basic Triangle")
 
 donut_compile_shaders_all_platforms(
     TARGET ${project}_shaders
+    PROJECT_NAME "Basic Triangle"
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
     FOLDER ${folder}
     OUTPUT_BASE ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${project}

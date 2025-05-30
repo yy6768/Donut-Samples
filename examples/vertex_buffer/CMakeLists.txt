@@ -29,6 +29,7 @@ set(folder "Examples/Vertex Buffer")
 
 donut_compile_shaders_all_platforms(
     TARGET ${project}_shaders
+    PROJECT_NAME "Vertex Buffer"
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
     FOLDER ${folder}
     OUTPUT_BASE ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${project}

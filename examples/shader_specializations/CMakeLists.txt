@@ -29,6 +29,7 @@ set(folder "Examples/Shader Specializations")
 
 donut_compile_shaders(
     TARGET ${project}_shaders
+    PROJECT_NAME "Shader Specializations"
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
     FOLDER ${folder}
     SPIRV_DXC ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${project}/spirv

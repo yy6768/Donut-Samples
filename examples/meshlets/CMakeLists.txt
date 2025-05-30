@@ -29,6 +29,7 @@ set(folder "Examples/Meshlets")
 
 donut_compile_shaders(
     TARGET ${project}_shaders
+    PROJECT_NAME "Meshlets"
     CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
     FOLDER ${folder}
     DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${project}/dxil
