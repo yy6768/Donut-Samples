@@ -51,12 +51,7 @@ add_subdirectory(examples/deferred_shading)
 add_subdirectory(examples/headless)
 
 if (NVRHI_WITH_DX12)
-    execute_process(COMMAND ${DXC_PATH} "-T cs_6_8" "ver_test.hlsl" OUTPUT_QUIET RESULT_VARIABLE DXC_SM_6_8 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/examples/work_graphs")
-    if (DXC_SM_6_8 EQUAL "0")
-        add_subdirectory(examples/work_graphs)
-    else()
-        message(WARNING "Work Graphs sample requires DirectX Compiler (dxc.exe) with Shader Model 6.8 support (dxcompiler.dll version 1.8.2403.34 or later) - sample will be omitted")
-    endif()
+    add_subdirectory(examples/work_graphs)
 endif()
 
 if (NVRHI_WITH_VULKAN OR NVRHI_WITH_DX12)

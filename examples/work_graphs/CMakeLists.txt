@@ -19,6 +19,7 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+include(../../donut/compileshaders.cmake)
 file(GLOB shaders "*.hlsl")
 file(GLOB sources "*.cpp" "*.h")
 
@@ -38,22 +39,15 @@ if (NOT EXISTS "${D3D12_AGILITY_SDK_RUNTIME_DIR}/D3D12Core.dll" OR NOT EXISTS "$
         WORKING_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/D3D12")
 endif()
 
-# Custom shader compilation using the agility SDK compiler rather than whatever is chosen during CMake config
-set_source_files_properties(SHADER_SOURCES FOLDER ${folder} PROPERTIES VS_TOOL_OVERRIDE "None") 
-add_custom_target(${project}_shaders DEPENDS ShaderMake SOURCES ${SHADER_SOURCES})
-
-set(dxcCompilerCommand ShaderMake
-    --config "${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg"
-    --out "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${project}/dxil"
-    --platform DXIL
-    --binaryBlob --outputExt .bin
-    -I ${DONUT_SHADER_INCLUDE_DIR}
-    --compiler "${DXC_PATH}"
-    --shaderModel 6_8)
-
-add_custom_command(TARGET ${project}_shaders PRE_BUILD COMMAND ${dxcCompilerCommand})
-set_target_properties(${project}_shaders PROPERTIES FOLDER ${folder})
-
+donut_compile_shaders(
+    TARGET ${project}_shaders
+    PROJECT_NAME "Work Graphs"
+    CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/shaders.cfg
+    FOLDER ${folder}
+    DXIL ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/${project}/dxil
+    SOURCES ${shaders}
+    SHADER_MODEL 6_8
+)
 
 add_executable(${project} WIN32 ${sources})
 target_include_directories(${project} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/AgilitySDK/include")
