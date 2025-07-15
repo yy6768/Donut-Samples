@@ -44,15 +44,23 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_RUNTIME_OUTPUT_DIRECT
 set(DONUT_SHADERS_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/framework")
 
 add_subdirectory(donut)
+
+if (NVRHI_WITH_DX12)
+    set(DONUT_D3D_AGILITY_SDK_URL "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.616.1")
+    set(DONUT_D3D_AGILITY_SDK_FETCH_DIR "" CACHE STRING "" FORCE)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/donut/cmake/FetchAgilitySDK.cmake")
+
+    file(COPY
+        "${DONUT_D3D_AGILITY_SDK_PATH}/build/native/bin/x64/D3D12Core.dll"
+        "${DONUT_D3D_AGILITY_SDK_PATH}/build/native/bin/x64/D3D12SDKLayers.dll"
+        DESTINATION "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/D3D12/")
+endif()
+
 add_subdirectory(feature_demo)
 add_subdirectory(examples/basic_triangle)
 add_subdirectory(examples/vertex_buffer)
 add_subdirectory(examples/deferred_shading)
 add_subdirectory(examples/headless)
-
-if (NVRHI_WITH_DX12)
-    add_subdirectory(examples/work_graphs)
-endif()
 
 if (NVRHI_WITH_VULKAN OR NVRHI_WITH_DX12)
     add_subdirectory(examples/bindless_rendering)
@@ -69,6 +77,9 @@ if (NVRHI_WITH_VULKAN OR NVRHI_WITH_DX12)
 endif()
 
 if (NVRHI_WITH_DX12)
+    # Work Graphs use a DX12-specific API
+    add_subdirectory(examples/work_graphs)
+
     # The RT Reflections example uses local bindings (local root signatures) which are unsupported on Vulkan
     add_subdirectory(examples/rt_reflections)
 endif()

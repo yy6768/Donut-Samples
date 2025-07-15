@@ -26,19 +26,6 @@ file(GLOB sources "*.cpp" "*.h")
 set(project work_graphs_d3d12)
 set(folder "Examples/Work Graphs")
 
-# Copy agility SDK bits to D3D12 folder right next to the executable
-set (D3D12_AGILITY_SDK_RUNTIME_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/D3D12")
-
-if (NOT EXISTS ${D3D12_AGILITY_SDK_RUNTIME_DIR})
-    execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${D3D12_AGILITY_SDK_RUNTIME_DIR})
-endif()
-
-if (NOT EXISTS "${D3D12_AGILITY_SDK_RUNTIME_DIR}/D3D12Core.dll" OR NOT EXISTS "${D3D12_AGILITY_SDK_RUNTIME_DIR}/D3D12SDKLayers.dll")
-    message(STATUS "Extracting Agility SDK runtime bits")
-    execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzf "${CMAKE_CURRENT_SOURCE_DIR}/AgilitySDK/d3d12_1.613.0.zip"
-        WORKING_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/D3D12")
-endif()
-
 donut_compile_shaders(
     TARGET ${project}_shaders
     PROJECT_NAME "Work Graphs"
@@ -50,7 +37,7 @@ donut_compile_shaders(
 )
 
 add_executable(${project} WIN32 ${sources})
-target_include_directories(${project} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/AgilitySDK/include")
+target_include_directories(${project} PRIVATE "${DONUT_D3D_AGILITY_SDK_PATH}/build/native/include")
 target_link_libraries(${project} donut_app donut_engine)
 add_dependencies(${project} ${project}_shaders)
 set_target_properties(${project} PROPERTIES FOLDER ${folder})
