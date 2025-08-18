@@ -28,3 +28,10 @@ set_target_properties(feature_demo PROPERTIES FOLDER "Donut Feature Demo")
 if (MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3 /MP")
 endif()
+
+if (DLSS_SHARED_LIBRARY_PATH)
+    add_custom_command(TARGET feature_demo POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		"${DLSS_SHARED_LIBRARY_PATH}"
+		"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/")
+endif()

@@ -50,6 +50,7 @@
 #include <donut/render/TemporalAntiAliasingPass.h>
 #include <donut/render/ToneMappingPasses.h>
 #include <donut/render/MipMapGenPass.h>
+#include <donut/render/DLSS.h>
 #include <donut/app/ApplicationBase.h>
 #include <donut/app/UserInterfaceUtils.h>
 #include <donut/app/Camera.h>
@@ -229,6 +230,7 @@ enum class AntiAliasingMode
 {
     NONE,
     TEMPORAL,
+    DLSS,
     MSAA_2X,
     MSAA_4X,
     MSAA_8X
@@ -251,6 +253,7 @@ struct UIData
     bool                                ShaderReoladRequested = false;
     bool                                EnableProceduralSky = true;
     bool                                EnableBloom = true;
+    bool                                DlssAvailable = false;
     float                               BloomSigma = 32.f;
     float                               BloomAlpha = 0.05f;
     bool                                EnableTranslucency = true;
@@ -295,6 +298,9 @@ private:
     std::unique_ptr<DeferredLightingPass> m_DeferredLightingPass;
     std::unique_ptr<SkyPass>            m_SkyPass;
     std::unique_ptr<TemporalAntiAliasingPass> m_TemporalAntiAliasingPass;
+#if DONUT_WITH_DLSS
+    std::unique_ptr<DLSS>               m_DLSS;
+#endif
     std::unique_ptr<BloomPass>          m_BloomPass;
     std::unique_ptr<ToneMappingPass>    m_ToneMappingPass;
     std::unique_ptr<SsaoPass>           m_SsaoPass;
@@ -390,6 +396,11 @@ public:
 
         m_FirstPersonCamera.SetMoveSpeed(3.0f);
         m_ThirdPersonCamera.SetMoveSpeed(3.0f);
+        
+#if DONUT_WITH_DLSS
+        // DLSS doesn't need to be re-created when we reload shaders, so we create it here and not in CreateRenderPasses()
+        m_DLSS = DLSS::Create(GetDevice(), *m_ShaderFactory, app::GetDirectoryWithExecutable().generic_string());
+#endif
         
         SetAsynchronousLoadingEnabled(true);
 
@@ -675,7 +686,8 @@ public:
         if (m_TemporalAntiAliasingPass)
             m_TemporalAntiAliasingPass->SetJitter(m_ui.TemporalAntiAliasingJitter);
 
-        float2 pixelOffset = m_ui.AntiAliasingMode == AntiAliasingMode::TEMPORAL && m_TemporalAntiAliasingPass 
+        float2 pixelOffset = (m_ui.AntiAliasingMode == AntiAliasingMode::TEMPORAL ||
+                              m_ui.AntiAliasingMode == AntiAliasingMode::DLSS) && m_TemporalAntiAliasingPass 
             ? m_TemporalAntiAliasingPass->GetCurrentPixelOffset() 
             : float2(0.f);
         
@@ -826,6 +838,16 @@ public:
         m_ToneMappingPass = std::make_unique<ToneMappingPass>(GetDevice(), m_ShaderFactory, m_CommonPasses, m_RenderTargets->LdrFramebuffer, *m_View, toneMappingParams);
 
         m_BloomPass = std::make_unique<BloomPass>(GetDevice(), m_ShaderFactory, m_CommonPasses, m_RenderTargets->ResolvedFramebuffer, *m_View);
+        
+#if DONUT_WITH_DLSS
+        if (m_DLSS)
+        {
+            dm::uint2 size = m_RenderTargets->GetSize();
+            m_DLSS->SetRenderSize(size.x, size.y, size.x, size.y);
+            
+            m_ui.DlssAvailable = m_DLSS->IsAvailable();
+        }
+#endif
 
         m_PreviousViewsValid = false;
     }
@@ -1055,14 +1077,42 @@ public:
 
         nvrhi::ITexture* finalHdrColor = m_RenderTargets->HdrColor;
 
-        if (m_ui.AntiAliasingMode == AntiAliasingMode::TEMPORAL)
+        if (m_ui.AntiAliasingMode == AntiAliasingMode::TEMPORAL || m_ui.AntiAliasingMode == AntiAliasingMode::DLSS)
         {
             if (m_PreviousViewsValid)
             {
                 m_TemporalAntiAliasingPass->RenderMotionVectors(m_CommandList, *m_View, *m_ViewPrevious);
             }
 
-            m_TemporalAntiAliasingPass->TemporalResolve(m_CommandList, m_ui.TemporalAntiAliasingParams, m_PreviousViewsValid, *m_View, *m_View);
+#if DONUT_WITH_DLSS
+            if (m_ui.AntiAliasingMode == AntiAliasingMode::DLSS)
+            {
+                if (m_DLSS && m_DLSS->IsAvailable() && !IsStereo())
+                {
+                    auto planarView = std::dynamic_pointer_cast<donut::engine::PlanarView>(m_View);
+                    assert(planarView);
+
+                    donut::render::DLSS::EvaluateParameters params;
+                    params.depthTexture = m_RenderTargets->Depth;
+                    params.motionVectorsTexture = m_RenderTargets->MotionVectors;
+                    params.inputColorTexture = m_RenderTargets->HdrColor;
+                    params.outputColorTexture = m_RenderTargets->ResolvedColor;
+                    params.exposureBuffer = m_ToneMappingPass->GetExposureBuffer();
+                    
+                    m_DLSS->Evaluate(m_CommandList, params, *planarView);
+                }
+                else
+                {
+                    // Fallback to TAA if DLSS is not available
+                    m_ui.AntiAliasingMode = AntiAliasingMode::TEMPORAL;
+                }
+            }
+#endif
+
+            if (m_ui.AntiAliasingMode == AntiAliasingMode::TEMPORAL)
+            {
+                m_TemporalAntiAliasingPass->TemporalResolve(m_CommandList, m_ui.TemporalAntiAliasingParams, m_PreviousViewsValid, *m_View, *m_View);
+            }
 
             finalHdrColor = m_RenderTargets->ResolvedColor;
             
@@ -1513,7 +1563,34 @@ protected:
             ImGui::EndCombo();
         }
         
-        ImGui::Combo("AA Mode", (int*)&m_ui.AntiAliasingMode, "None\0TemporalAA\0MSAA 2x\0MSAA 4x\0MSAA 8x\0");
+        if (m_ui.AntiAliasingMode == AntiAliasingMode::DLSS && !m_ui.DlssAvailable)
+            m_ui.AntiAliasingMode = AntiAliasingMode::TEMPORAL; // Fallback to TAA if DLSS is not available
+
+        const char* aaModes[] = {
+            "None",
+            "TemporalAA",
+            "DLSS",
+            "MSAA 2x",
+            "MSAA 4x",
+            "MSAA 8x"
+        };
+        int aaMode = static_cast<int>(m_ui.AntiAliasingMode);
+        if (ImGui::BeginCombo("AA Mode", aaModes[aaMode]))
+        {
+            for (int n = 0; n < IM_ARRAYSIZE(aaModes); n++)
+            {
+                if (n == int(AntiAliasingMode::DLSS) && !m_ui.DlssAvailable)
+                    continue; // Skip DLSS if not available
+
+                bool isSelected = (aaMode == n);
+                if (ImGui::Selectable(aaModes[n], isSelected))
+                    m_ui.AntiAliasingMode = static_cast<AntiAliasingMode>(n);
+                if (isSelected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
         ImGui::Combo("TAA Camera Jitter", (int*)&m_ui.TemporalAntiAliasingJitter, "MSAA\0Halton\0R2\0White Noise\0");
         
         ImGui::SliderFloat("Ambient Intensity", &m_ui.AmbientIntensity, 0.f, 1.f);
@@ -1613,7 +1690,9 @@ protected:
             ImGui::End();
         }
 
-        if (m_ui.AntiAliasingMode != AntiAliasingMode::NONE && m_ui.AntiAliasingMode != AntiAliasingMode::TEMPORAL)
+        if (m_ui.AntiAliasingMode != AntiAliasingMode::NONE &&
+            m_ui.AntiAliasingMode != AntiAliasingMode::TEMPORAL &&
+            m_ui.AntiAliasingMode != AntiAliasingMode::DLSS)
             m_ui.UseDeferredShading = false;
 
         if (!m_ui.UseDeferredShading)
@@ -1677,7 +1756,6 @@ int main(int __argc, const char* const* __argv)
 
     DeviceCreationParameters deviceParams;
     
-    // deviceParams.adapter = VrSystem::GetRequiredAdapter();
     deviceParams.backBufferWidth = 1920;
     deviceParams.backBufferHeight = 1080;
     deviceParams.swapChainSampleCount = 1;
@@ -1686,6 +1764,15 @@ int main(int __argc, const char* const* __argv)
     deviceParams.vsyncEnabled = true;
     deviceParams.enablePerMonitorDPI = true;
     deviceParams.supportExplicitDisplayScaling = true;
+    
+#if DONUT_WITH_DLSS && DONUT_WITH_VULKAN
+    if (api == nvrhi::GraphicsAPI::VULKAN)
+    {
+        donut::render::DLSS::GetRequiredVulkanExtensions(
+            deviceParams.optionalVulkanInstanceExtensions,
+            deviceParams.optionalVulkanDeviceExtensions);
+    }
+#endif
 
     std::string sceneName;
     if (!ProcessCommandLine(__argc, __argv, deviceParams, sceneName))
