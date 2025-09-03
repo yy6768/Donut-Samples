@@ -1,0 +1,7 @@
+#pragma once
+
+
+
+#define ORIENTATION_MODE_BILLBOARD      0
+#define ORIENTATION_MODE_QUATERNION     1
+#define ORIENTATION_MODE_VELOCITY       2

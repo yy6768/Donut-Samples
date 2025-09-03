@@ -2,27 +2,40 @@
 #include <donut/engine/ShaderFactory.h>
 #include <donut/app/DeviceManager.h>
 #include <donut/core/log.h>
-#include <donut/core/math/math.h>
 #include <donut/core/vfs/VFS.h>
+#include <donut/core/math/math.h>
 #include <nvrhi/utils.h>
 #include <memory>
 #include <chrono>
 #include <filesystem>
 
+#include "particles_cb.h"
+
 using namespace donut;
+using namespace donut::math;
 
 static const char* g_WindowTitle = "Donut Example: Basic Compute Particles";
 
 constexpr uint32_t c_MaxParticles = 1024;
 
+static float RandomFloat()
+{
+    return float(std::rand()) / RAND_MAX;
+}
+
+static float3 RandomFloat3()
+{
+    return float3(RandomFloat(), RandomFloat(), RandomFloat());
+}
+
 struct Particle
 {
-    float position[2];
-    float velocity[2];
-    float gradientPos[4];
-    float life;
-    uint32_t active;
+    float2 position;
+    float2 velocity;
+    float3 color;
 };
+
+
 
 struct ComputeConstants
 {
@@ -36,16 +49,30 @@ struct ComputeConstants
 class BasicComputeApp : public app::IRenderPass
 {
 private:
+	std::shared_ptr<vfs::RootFileSystem> m_RootFS;
+    // Compute pipeline
+    nvrhi::ShaderHandle m_ComputeShader;
+    nvrhi::ComputePipelineHandle m_ComputePipeline;
+    nvrhi::CommandListHandle m_CommandList;
+    nvrhi::BindingLayoutHandle m_ComputeBindingLayout;
+    nvrhi::BindingLayoutHandle m_GraphicsBindingLayout;
+    nvrhi::BindingSetHandle m_ComputeBindingSet;
+    nvrhi::BindingSetHandle m_GraphicsBindingSet;
+
+    // CB
+    nvrhi::BufferHandle m_ConstantBuffer;
+
+    // Particle buffer
+    std::vector<Particle> m_Particles;
+    nvrhi::BufferHandle m_ParticleBuffer;
+
+    std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
+
     nvrhi::ShaderHandle m_VertexShader;
     nvrhi::ShaderHandle m_PixelShader;
-    std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
     
-    nvrhi::ComputePipelineHandle m_ComputePipeline;
-    nvrhi::GraphicsPipelineHandle m_Pipeline;
-    nvrhi::BufferHandle m_ParticleBuffer;
-    nvrhi::BufferHandle m_ConstantBuffer;
-    nvrhi::BindingLayoutHandle m_BindingLayout;
-    nvrhi::BindingSetHandle m_BindingSet;
+    nvrhi::GraphicsPipelineHandle m_GraphicsPipeline;
+    
     
     std::chrono::high_resolution_clock::time_point m_PreviousTime;
     
@@ -54,7 +81,6 @@ private:
 
 public:
     using IRenderPass::IRenderPass;
-
     bool Init()
     {
         std::filesystem::path appShaderPath = app::GetDirectoryWithExecutable() / "shaders/basic_compute" / app::GetShaderTypeName(GetDevice()->getGraphicsAPI());
@@ -63,7 +89,6 @@ public:
         m_ShaderFactory = std::make_shared<engine::ShaderFactory>(GetDevice(), nativeFS, appShaderPath);
         
         CreateResources();
-        CreateGraphicsPipeline();
         CreateComputePipeline();
         
         m_PreviousTime = std::chrono::high_resolution_clock::now();
@@ -73,15 +98,18 @@ public:
     
     void CreateResources()
     {
+        // Particle buffer - 需要同时支持UAV (compute)和SRV (graphics)
         nvrhi::BufferDesc particleBufferDesc;
         particleBufferDesc.byteSize = sizeof(Particle) * c_MaxParticles;
         particleBufferDesc.structStride = sizeof(Particle);
         particleBufferDesc.canHaveUAVs = true;
+        particleBufferDesc.canHaveRawViews = true;
         particleBufferDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
         particleBufferDesc.keepInitialState = true;
         particleBufferDesc.debugName = "ParticleBuffer";
         m_ParticleBuffer = GetDevice()->createBuffer(particleBufferDesc);
         
+        // Constant buffer
         nvrhi::BufferDesc constantBufferDesc;
         constantBufferDesc.byteSize = sizeof(ComputeConstants);
         constantBufferDesc.isConstantBuffer = true;
@@ -89,11 +117,19 @@ public:
         constantBufferDesc.maxVersions = 16;
         constantBufferDesc.debugName = "ComputeConstants";
         m_ConstantBuffer = GetDevice()->createBuffer(constantBufferDesc);
+
+        // Shader handles
+        m_VertexShader = m_ShaderFactory->CreateShader("particles.hlsl", "vertex_particles", nullptr, nvrhi::ShaderType::Vertex);
+        m_PixelShader = m_ShaderFactory->CreateShader("particles.hlsl", "pixel_particles", nullptr, nvrhi::ShaderType::Pixel);
+        m_ComputeShader = m_ShaderFactory->CreateShader("particles.hlsl", "compute_particles", nullptr, nvrhi::ShaderType::Compute);
         
+        // init particles
         std::vector<Particle> initialParticles(c_MaxParticles);
-        for (auto& particle : initialParticles)
+        for (uint32_t i = 0; i < c_MaxParticles; ++i)
         {
-            particle.active = 0;
+            initialParticles[i].position = math::float2(RandomFloat() * 2.0f - 1.0f, RandomFloat() * 2.0f - 1.0f);
+            initialParticles[i].velocity = math::float2((RandomFloat() - 0.5f) * 0.1f, (RandomFloat() - 0.5f) * 0.1f);
+            initialParticles[i].color = math::float3(RandomFloat(), RandomFloat(), RandomFloat());
         }
         
         auto commandList = GetDevice()->createCommandList();
@@ -109,40 +145,76 @@ public:
     
     void CreateComputePipeline()
     {
-        auto computeShader = m_ShaderFactory->CreateShader("particles.hlsl", "compute_particles", nullptr, nvrhi::ShaderType::Compute);
-        
-        nvrhi::BindingLayoutDesc bindingLayoutDesc;
-        bindingLayoutDesc.visibility = nvrhi::ShaderType::Compute;
-        bindingLayoutDesc.bindings = {
+        // Compute binding layout
+        nvrhi::BindingLayoutDesc computeBindingLayoutDesc;
+        computeBindingLayoutDesc.visibility = nvrhi::ShaderType::Compute;
+        computeBindingLayoutDesc.bindings = {
             nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
             nvrhi::BindingLayoutItem::StructuredBuffer_UAV(0)
         };
-        m_BindingLayout = GetDevice()->createBindingLayout(bindingLayoutDesc);
+        m_ComputeBindingLayout = GetDevice()->createBindingLayout(computeBindingLayoutDesc);
         
         nvrhi::ComputePipelineDesc pipelineDesc;
-        pipelineDesc.CS = computeShader;
-        pipelineDesc.bindingLayouts = { m_BindingLayout };
+        pipelineDesc.CS = m_ComputeShader;
+        pipelineDesc.bindingLayouts = { m_ComputeBindingLayout };
         m_ComputePipeline = GetDevice()->createComputePipeline(pipelineDesc);
         
-        nvrhi::BindingSetDesc bindingSetDesc;
-        bindingSetDesc.bindings = {
+        nvrhi::BindingSetDesc computeBindingSetDesc;
+        computeBindingSetDesc.bindings = {
             nvrhi::BindingSetItem::ConstantBuffer(0, m_ConstantBuffer),
             nvrhi::BindingSetItem::StructuredBuffer_UAV(0, m_ParticleBuffer)
         };
-        m_BindingSet = GetDevice()->createBindingSet(bindingSetDesc, m_BindingLayout);
+        m_ComputeBindingSet = GetDevice()->createBindingSet(computeBindingSetDesc, m_ComputeBindingLayout);
     }
 
-    void CreateGraphicsPipeline() 
+    void CreateGraphicsPipeline(nvrhi::IFramebuffer* framebuffer) 
     {
-        auto vertexShader = m_ShaderFactory->CreateShader("particles.hlsl", "vertex_particles", nullptr, nvrhi::ShaderType::Vertex);
-        auto pixelShader = m_ShaderFactory->CreateShader("particles.hlsl", "pixel_particles", nullptr, nvrhi::ShaderType::Pixel);
+        if (m_GraphicsPipeline)
+            return;
+            
+        // 检查shader是否加载成功
+        if (!m_VertexShader || !m_PixelShader)
+        {
+            log::error("Failed to load vertex or pixel shader");
+            return;
+        }
+            
+        // Graphics binding layout - 需要constant buffer和SRV
+        nvrhi::BindingLayoutDesc graphicsBindingLayoutDesc;
+        graphicsBindingLayoutDesc.visibility = nvrhi::ShaderType::Vertex | nvrhi::ShaderType::Pixel;
+        graphicsBindingLayoutDesc.bindings = {
+            nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),  // b0
+            nvrhi::BindingLayoutItem::StructuredBuffer_SRV(0)    // t0
+        };
+        m_GraphicsBindingLayout = GetDevice()->createBindingLayout(graphicsBindingLayoutDesc);
+        
+        // Graphics binding set
+        nvrhi::BindingSetDesc graphicsBindingSetDesc;
+        graphicsBindingSetDesc.bindings = {
+            nvrhi::BindingSetItem::ConstantBuffer(0, m_ConstantBuffer),
+            nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_ParticleBuffer)
+        };
+        m_GraphicsBindingSet = GetDevice()->createBindingSet(graphicsBindingSetDesc, m_GraphicsBindingLayout);
+        
+        // Graphics pipeline - 使用SV_VertexID，不需要input layout
         nvrhi::GraphicsPipelineDesc psoDesc;
-        psoDesc.VS = vertexShader;
-        psoDesc.PS = pixelShader;
-        psoDesc.primType = nvrhi::PrimitiveType::TriangleList;
+        psoDesc.VS = m_VertexShader;
+        psoDesc.PS = m_PixelShader;
+        psoDesc.inputLayout = nullptr;  // 不使用input layout
+        psoDesc.primType = nvrhi::PrimitiveType::PointList;
         psoDesc.renderState.depthStencilState.depthTestEnable = false;
+        psoDesc.renderState.blendState.targets[0].blendEnable = true;
+        psoDesc.renderState.blendState.targets[0].srcBlend = nvrhi::BlendFactor::SrcAlpha;
+        psoDesc.renderState.blendState.targets[0].destBlend = nvrhi::BlendFactor::InvSrcAlpha;
+        psoDesc.renderState.blendState.targets[0].blendOp = nvrhi::BlendOp::Add;
+        psoDesc.bindingLayouts = { m_GraphicsBindingLayout };
 
         m_GraphicsPipeline = GetDevice()->createGraphicsPipeline(psoDesc, framebuffer);
+        
+        if (!m_GraphicsPipeline)
+        {
+            log::error("Failed to create graphics pipeline");
+        }
     }
     void Animate(float fElapsedTimeSeconds) override
     {
@@ -155,6 +227,9 @@ public:
     
     void Render(nvrhi::IFramebuffer* framebuffer) override
     {
+        if (!m_GraphicsPipeline) {
+            CreateGraphicsPipeline(framebuffer);
+        }
         auto currentTime = std::chrono::high_resolution_clock::now();
         float deltaTime = std::chrono::duration<float>(currentTime - m_PreviousTime).count();
         m_PreviousTime = currentTime;
@@ -170,30 +245,36 @@ public:
         
         commandList->writeBuffer(m_ConstantBuffer, &constants, sizeof(constants));
         
+        // Compute pass
         nvrhi::ComputeState computeState;
         computeState.pipeline = m_ComputePipeline;
-        computeState.bindings = { m_BindingSet };
+        computeState.bindings = { m_ComputeBindingSet };
         commandList->setComputeState(computeState);
         
         uint32_t dispatchX = (c_MaxParticles + 63) / 64;
         commandList->dispatch(dispatchX, 1, 1);
         
-        commandList->clearState();
+        // 同步：compute -> graphics
+        commandList->setBufferState(m_ParticleBuffer, nvrhi::ResourceStates::ShaderResource);
         
+        // Clear framebuffer
         nvrhi::utils::ClearColorAttachment(commandList, framebuffer, 0, nvrhi::Color(0.1f, 0.1f, 0.2f, 1.0f));
         
-        commandList->setBufferState(m_ParticleBuffer, nvrhi::ResourceStates::VertexBuffer);
-
+        // Graphics pass
         nvrhi::GraphicsState graphicsState;
         graphicsState.pipeline = m_GraphicsPipeline;
         graphicsState.framebuffer = framebuffer;
-        graphicsState.viewport.addViewportAndScissorRect(framebuffer->getWidth(), framebuffer->getHeight());
+        graphicsState.bindings = { m_GraphicsBindingSet };
+        graphicsState.viewport.addViewportAndScissorRect(framebuffer->getFramebufferInfo().getViewport());
+        // 不设置vertex buffers，使用SV_VertexID
+        
         commandList->setGraphicsState(graphicsState);
         
         nvrhi::DrawArguments args;
         args.vertexCount = c_MaxParticles;
         commandList->draw(args);
 
+        // 恢复状态用于下一帧compute
         commandList->setBufferState(m_ParticleBuffer, nvrhi::ResourceStates::UnorderedAccess);
 
         commandList->close();
