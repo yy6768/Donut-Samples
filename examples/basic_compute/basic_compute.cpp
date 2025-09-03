@@ -2,6 +2,7 @@
 #include <donut/engine/ShaderFactory.h>
 #include <donut/app/DeviceManager.h>
 #include <donut/core/log.h>
+#include <donut/core/math/math.h>
 #include <donut/core/vfs/VFS.h>
 #include <nvrhi/utils.h>
 #include <memory>
@@ -16,8 +17,9 @@ constexpr uint32_t c_MaxParticles = 1024;
 
 struct Particle
 {
-    float position[3];
-    float velocity[3];
+    float position[2];
+    float velocity[2];
+    float gradientPos[4];
     float life;
     uint32_t active;
 };
@@ -34,9 +36,12 @@ struct ComputeConstants
 class BasicComputeApp : public app::IRenderPass
 {
 private:
+    nvrhi::ShaderHandle m_VertexShader;
+    nvrhi::ShaderHandle m_PixelShader;
     std::shared_ptr<engine::ShaderFactory> m_ShaderFactory;
     
     nvrhi::ComputePipelineHandle m_ComputePipeline;
+    nvrhi::GraphicsPipelineHandle m_Pipeline;
     nvrhi::BufferHandle m_ParticleBuffer;
     nvrhi::BufferHandle m_ConstantBuffer;
     nvrhi::BindingLayoutHandle m_BindingLayout;
@@ -58,7 +63,8 @@ public:
         m_ShaderFactory = std::make_shared<engine::ShaderFactory>(GetDevice(), nativeFS, appShaderPath);
         
         CreateResources();
-        CreatePipeline();
+        CreateGraphicsPipeline();
+        CreateComputePipeline();
         
         m_PreviousTime = std::chrono::high_resolution_clock::now();
         
@@ -101,7 +107,7 @@ public:
         GetDevice()->waitForIdle();
     }
     
-    void CreatePipeline()
+    void CreateComputePipeline()
     {
         auto computeShader = m_ShaderFactory->CreateShader("particles.hlsl", "compute_particles", nullptr, nvrhi::ShaderType::Compute);
         
@@ -125,7 +131,19 @@ public:
         };
         m_BindingSet = GetDevice()->createBindingSet(bindingSetDesc, m_BindingLayout);
     }
-    
+
+    void CreateGraphicsPipeline() 
+    {
+        auto vertexShader = m_ShaderFactory->CreateShader("particles.hlsl", "vertex_particles", nullptr, nvrhi::ShaderType::Vertex);
+        auto pixelShader = m_ShaderFactory->CreateShader("particles.hlsl", "pixel_particles", nullptr, nvrhi::ShaderType::Pixel);
+        nvrhi::GraphicsPipelineDesc psoDesc;
+        psoDesc.VS = vertexShader;
+        psoDesc.PS = pixelShader;
+        psoDesc.primType = nvrhi::PrimitiveType::TriangleList;
+        psoDesc.renderState.depthStencilState.depthTestEnable = false;
+
+        m_GraphicsPipeline = GetDevice()->createGraphicsPipeline(psoDesc, framebuffer);
+    }
     void Animate(float fElapsedTimeSeconds) override
     {
         GetDeviceManager()->SetInformativeWindowTitle(g_WindowTitle);
@@ -164,6 +182,20 @@ public:
         
         nvrhi::utils::ClearColorAttachment(commandList, framebuffer, 0, nvrhi::Color(0.1f, 0.1f, 0.2f, 1.0f));
         
+        commandList->setBufferState(m_ParticleBuffer, nvrhi::ResourceStates::VertexBuffer);
+
+        nvrhi::GraphicsState graphicsState;
+        graphicsState.pipeline = m_GraphicsPipeline;
+        graphicsState.framebuffer = framebuffer;
+        graphicsState.viewport.addViewportAndScissorRect(framebuffer->getWidth(), framebuffer->getHeight());
+        commandList->setGraphicsState(graphicsState);
+        
+        nvrhi::DrawArguments args;
+        args.vertexCount = c_MaxParticles;
+        commandList->draw(args);
+
+        commandList->setBufferState(m_ParticleBuffer, nvrhi::ResourceStates::UnorderedAccess);
+
         commandList->close();
         GetDevice()->executeCommandList(commandList);
     }
